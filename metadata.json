@@ -1,0 +1,6 @@
+{
+  "name": "KALE RUNNER",
+  "description": "A brisk, witty Pac-Man-style maze game with a healthy-food theme for adults. Eat clean. Run fast. Trust no donut.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
