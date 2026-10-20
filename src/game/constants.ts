@@ -7,6 +7,9 @@ export const CANVAS_HEIGHT = 680;
 export const HUD_HEIGHT = 64;
 export const BOTTOM_BAR_HEIGHT = 28;
 
+// Player speed
+export const PLAYER_BASE_SPEED = 4.4; // tiles per second (normal speed enabled from start)
+
 // Scoring
 export const SCORE_VEGGIE = 10;
 export const SCORE_POWER_VEGGIE = 50;

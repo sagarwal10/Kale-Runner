@@ -52,8 +52,15 @@ export class HUDManager {
   private hintCooldownTimer: number = 0; // must be >= 6s between hints
   private lastFactTimer: number = 0; // at most once every 15s
 
-  // Startup mission banner container
+  // Startup mission banner container & pre-start state tracking
   private missionContainer: Phaser.GameObjects.Container;
+  private isMissionBannerVisible: boolean = false;
+  private isMissionBannerDismissing: boolean = false;
+  private missionTimerEvent?: Phaser.Time.TimerEvent;
+  private missionTimerText?: Phaser.GameObjects.Text;
+  private missionElapsedSec: number = 0;
+  private missionInputCleanup?: () => void;
+  private onMissionBannerDismissed?: (dir?: { x: number; y: number } | null) => void;
 
   // Tracking triggered one-time events per level or per game
   private triggered50: boolean = false;
@@ -197,119 +204,326 @@ export class HUDManager {
   }
 
   private buildMissionContainer(): void {
-    const cardWidth = 760;
-    const cardHeight = 236;
+    const cardWidth = 720;
+    const cardHeight = 280;
 
     const bg = this.scene.add.graphics();
     // Glassy dark backdrop with dual neon stroke
-    bg.fillStyle(0x020617, 0.96);
-    bg.fillRoundedRect(-cardWidth / 2, -cardHeight / 2, cardWidth, cardHeight, 20);
+    bg.fillStyle(0x020617, 0.97);
+    bg.fillRoundedRect(-cardWidth / 2, -cardHeight / 2, cardWidth, cardHeight, 18);
 
     // Cyan outer glow
-    bg.lineStyle(6, 0x06b6d4, 0.28);
-    bg.strokeRoundedRect(-cardWidth / 2 - 2, -cardHeight / 2 - 2, cardWidth + 4, cardHeight + 4, 22);
+    bg.lineStyle(5, 0x06b6d4, 0.28);
+    bg.strokeRoundedRect(-cardWidth / 2 - 2, -cardHeight / 2 - 2, cardWidth + 4, cardHeight + 4, 20);
 
     // Laser emerald inner border
-    bg.lineStyle(2.5, 0x10b981, 0.95);
-    bg.strokeRoundedRect(-cardWidth / 2, -cardHeight / 2, cardWidth, cardHeight, 20);
+    bg.lineStyle(2, 0x10b981, 0.95);
+    bg.strokeRoundedRect(-cardWidth / 2, -cardHeight / 2, cardWidth, cardHeight, 18);
 
-    // Tag / Badge on top
-    const tag = this.scene.add.text(0, -82, '🥬 KALE RUNNER  ·  HOW TO PLAY', {
+    // Make backdrop interactive so clicking anywhere dismisses it
+    bg.setInteractive(
+      new Phaser.Geom.Rectangle(-cardWidth / 2, -cardHeight / 2, cardWidth, cardHeight),
+      Phaser.Geom.Rectangle.Contains
+    );
+    bg.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      pointer.event?.stopPropagation?.();
+      this.hideStartupMissionMessage();
+    });
+
+    // Tag / Badge on top left
+    const tag = this.scene.add.text(-cardWidth / 2 + 28, -112, '🥬 KALE RUNNER  ·  HOW TO PLAY', {
       fontFamily: '"Plus Jakarta Sans", sans-serif',
-      fontSize: '12px',
+      fontSize: '13px',
       fontStyle: '900',
       color: '#34d399',
     });
-    tag.setOrigin(0.5, 0.5);
+
+    // Digital Live Timer Pill in top middle
+    const timerBg = this.scene.add.graphics();
+    timerBg.fillStyle(0x0f172a, 0.95);
+    timerBg.fillRoundedRect(-95, -14, 190, 28, 7);
+    timerBg.lineStyle(1.5, 0x10b981, 0.9);
+    timerBg.strokeRoundedRect(-95, -14, 190, 28, 7);
+
+    this.missionTimerText = this.scene.add.text(0, 0, '⏱️ READY TIMER: 00:00', {
+      fontFamily: '"JetBrains Mono", monospace',
+      fontSize: '12px',
+      fontStyle: 'bold',
+      color: '#4ade80',
+    });
+    this.missionTimerText.setOrigin(0.5, 0.5);
+
+    const timerContainer = this.scene.add.container(60, -104, [timerBg, this.missionTimerText]);
+
+    // Start Button on top right
+    const startBtnBg = this.scene.add.graphics();
+    startBtnBg.fillStyle(0x047857, 0.95);
+    startBtnBg.fillRoundedRect(-52, -14, 104, 28, 7);
+    startBtnBg.lineStyle(1.5, 0x34d399, 1);
+    startBtnBg.strokeRoundedRect(-52, -14, 104, 28, 7);
+
+    const startBtnText = this.scene.add.text(0, 0, '▶ Start Game', {
+      fontFamily: '"Plus Jakarta Sans", sans-serif',
+      fontSize: '12px',
+      fontStyle: 'bold',
+      color: '#ffffff',
+    });
+    startBtnText.setOrigin(0.5, 0.5);
+
+    const startBtn = this.scene.add.container(cardWidth / 2 - 76, -104, [startBtnBg, startBtnText]);
+    startBtn.setSize(104, 28);
+    startBtn.setInteractive({ useHandCursor: true });
+    startBtn.on('pointerover', () => {
+      startBtnBg.clear();
+      startBtnBg.fillStyle(0x059669, 1);
+      startBtnBg.fillRoundedRect(-52, -14, 104, 28, 7);
+      startBtnBg.lineStyle(2, 0x6ee7b7, 1);
+      startBtnBg.strokeRoundedRect(-52, -14, 104, 28, 7);
+    });
+    startBtn.on('pointerout', () => {
+      startBtnBg.clear();
+      startBtnBg.fillStyle(0x047857, 0.95);
+      startBtnBg.fillRoundedRect(-52, -14, 104, 28, 7);
+      startBtnBg.lineStyle(1.5, 0x34d399, 1);
+      startBtnBg.strokeRoundedRect(-52, -14, 104, 28, 7);
+    });
+    startBtn.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      pointer.event?.stopPropagation?.();
+      this.hideStartupMissionMessage();
+    });
 
     // Big Main Message (Headline)
-    const mainHeadline = this.scene.add.text(0, -42, 'Eat Veggies to Unlock the Door! 🚪', {
+    const mainHeadline = this.scene.add.text(0, -64, 'Eat Veggies to Unlock the Exit Door! 🚪', {
       fontFamily: '"Plus Jakarta Sans", sans-serif',
-      fontSize: '28px',
+      fontSize: '24px',
       fontStyle: '900',
       color: '#4ade80',
       stroke: '#052e16',
-      strokeThickness: 5,
+      strokeThickness: 4,
     });
     mainHeadline.setOrigin(0.5, 0.5);
 
-    // Subtitle warning about pizza & donuts
-    const subText = this.scene.add.text(
-      0,
-      -2,
-      'Avoid the unhealthy foods chasing you like pizza 🍕 and donuts 🍩',
+    // 3 Clear Instruction rows with icons
+    const tip1 = this.scene.add.text(
+      -cardWidth / 2 + 36,
+      -26,
+      '🥦  1. Collect Veggies: Eat all green veggies on the floor to power up and unlock the door.',
       {
         fontFamily: '"Plus Jakarta Sans", sans-serif',
-        fontSize: '16px',
+        fontSize: '14px',
         fontStyle: 'bold',
-        color: '#f1f5f9',
+        color: '#f8fafc',
       }
     );
-    subText.setOrigin(0.5, 0.5);
 
-    // Explicit instruction to head to the locked door once unlocked
-    const doorInstruction = this.scene.add.text(
-      0,
-      36,
-      '🔒 Look for the highlighted Locked Door — head there after eating veggies to escape!',
+    const tip2 = this.scene.add.text(
+      -cardWidth / 2 + 36,
+      4,
+      '🍩  2. Evade Junk Food: Avoid unhealthy chasers (🍕 Pizza, 🍩 Donut, 🥤 Soda) chasing you!',
       {
         fontFamily: '"Plus Jakarta Sans", sans-serif',
-        fontSize: '15px',
+        fontSize: '14px',
         fontStyle: 'bold',
-        color: '#fbbf24',
+        color: '#fca5a5',
       }
     );
-    doorInstruction.setOrigin(0.5, 0.5);
 
-    // Call to action
-    const startHint = this.scene.add.text(0, 76, 'Use Arrow Keys or WASD to move & begin running', {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '13px',
-      fontStyle: 'bold',
-      color: '#38bdf8',
+    const tip3 = this.scene.add.text(
+      -cardWidth / 2 + 36,
+      34,
+      '🚪  3. Escape to Advance: Head into the glowing Exit Door once unlocked to conquer the level!',
+      {
+        fontFamily: '"Plus Jakarta Sans", sans-serif',
+        fontSize: '14px',
+        fontStyle: 'bold',
+        color: '#fef08a',
+      }
+    );
+
+    // Call to action bar at bottom
+    const ctaBg = this.scene.add.graphics();
+    ctaBg.fillStyle(0x064e3b, 0.95);
+    ctaBg.fillRoundedRect(-cardWidth / 2 + 32, 66, cardWidth - 64, 38, 8);
+    ctaBg.lineStyle(1.5, 0x10b981, 1);
+    ctaBg.strokeRoundedRect(-cardWidth / 2 + 32, 66, cardWidth - 64, 38, 8);
+
+    const ctaText = this.scene.add.text(
+      0,
+      85,
+      '▶ PRESS ANY KEY TO START RUNNING (OR CLICK HERE)',
+      {
+        fontFamily: '"Plus Jakarta Sans", sans-serif',
+        fontSize: '14px',
+        fontStyle: '900',
+        color: '#a7f3d0',
+      }
+    );
+    ctaText.setOrigin(0.5, 0.5);
+
+    // Make CTA strip interactive
+    const ctaHit = this.scene.add.zone(0, 85, cardWidth - 64, 38);
+    ctaHit.setInteractive({ useHandCursor: true });
+    ctaHit.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      pointer.event?.stopPropagation?.();
+      this.hideStartupMissionMessage();
     });
-    startHint.setOrigin(0.5, 0.5);
 
-    this.missionContainer.add([bg, tag, mainHeadline, subText, doorInstruction, startHint]);
+    // Subtext explanation: Game will not start until a key is pressed
+    const pausedHint = this.scene.add.text(
+      0,
+      118,
+      '⏸️ Game paused · Characters will not start moving until you press a key',
+      {
+        fontFamily: '"JetBrains Mono", monospace',
+        fontSize: '12px',
+        fontStyle: 'bold',
+        color: '#94a3b8',
+      }
+    );
+    pausedHint.setOrigin(0.5, 0.5);
+
+    this.missionContainer.add([
+      bg,
+      tag,
+      timerContainer,
+      startBtn,
+      mainHeadline,
+      tip1,
+      tip2,
+      tip3,
+      ctaBg,
+      ctaText,
+      ctaHit,
+      pausedHint,
+    ]);
+  }
+
+  private updateMissionTimerDisplay(): void {
+    if (!this.missionTimerText) return;
+    const mm = String(Math.floor(this.missionElapsedSec / 60)).padStart(2, '0');
+    const ss = String(this.missionElapsedSec % 60).padStart(2, '0');
+    this.missionTimerText.setText(`⏱️ READY TIMER: ${mm}:${ss}`);
   }
 
   /**
-   * Show the startup mission disappearing message (Big & Centered)
+   * Show the startup mission banner with live timer.
+   * Does NOT disappear until a key is pressed or clicked.
    */
-  public showStartupMissionMessage(): void {
+  public showStartupMissionMessage(onDismiss?: (dir?: { x: number; y: number } | null) => void): void {
+    this.onMissionBannerDismissed = onDismiss;
+
+    if (this.isMissionBannerVisible) {
+      this.hideStartupMissionMessage();
+    }
+
     this.scene.tweens.killTweensOf(this.missionContainer);
+    if (this.missionTimerEvent) {
+      this.missionTimerEvent.remove(false);
+      this.missionTimerEvent = undefined;
+    }
+
+    this.missionElapsedSec = 0;
+    this.updateMissionTimerDisplay();
+
+    this.isMissionBannerVisible = true;
+    this.isMissionBannerDismissing = false;
     this.missionContainer.setPosition(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
-    this.missionContainer.setScale(0.86);
+    this.missionContainer.setScale(0.92);
     this.missionContainer.setAlpha(0);
     this.missionContainer.setVisible(true);
 
+    // Clean entrance tween
     this.scene.tweens.add({
       targets: this.missionContainer,
       alpha: 1,
       scaleX: 1.0,
       scaleY: 1.0,
-      duration: 450,
+      duration: 250,
       ease: 'Back.easeOut',
-      onComplete: () => {
-        // Auto-fade after 5.5 seconds if player hasn't moved yet
-        this.scene.time.delayedCall(5500, () => {
-          this.hideStartupMissionMessage();
-        });
-      },
     });
+
+    // Start live timer counting seconds on the banner
+    this.missionTimerEvent = this.scene.time.addEvent({
+      delay: 1000,
+      callback: () => {
+        if (!this.isMissionBannerVisible) return;
+        this.missionElapsedSec++;
+        this.updateMissionTimerDisplay();
+      },
+      loop: true,
+    });
+
+    // Interactive dismiss listeners: any keydown or pointerdown dismisses and immediately starts game
+    const onKeyHit = (event: KeyboardEvent) => {
+      let initialDir: { x: number; y: number } | null = null;
+      const key = event?.key?.toLowerCase();
+      const code = event?.code;
+      if (key === 'arrowup' || code === 'KeyW' || key === 'w') {
+        initialDir = { x: 0, y: -1 };
+      } else if (key === 'arrowdown' || code === 'KeyS' || key === 's') {
+        initialDir = { x: 0, y: 1 };
+      } else if (key === 'arrowleft' || code === 'KeyA' || key === 'a') {
+        initialDir = { x: -1, y: 0 };
+      } else if (key === 'arrowright' || code === 'KeyD' || key === 'd') {
+        initialDir = { x: 1, y: 0 };
+      }
+      this.hideStartupMissionMessage(initialDir);
+    };
+    const onCanvasClick = () => {
+      this.hideStartupMissionMessage();
+    };
+
+    this.scene.input.keyboard?.once('keydown', onKeyHit);
+    this.scene.input.once('pointerdown', onCanvasClick);
+
+    this.missionInputCleanup = () => {
+      this.scene.input.keyboard?.off('keydown', onKeyHit);
+      this.scene.input.off('pointerdown', onCanvasClick);
+    };
   }
 
-  public hideStartupMissionMessage(): void {
-    if (!this.missionContainer.visible) return;
+  /**
+   * Smoothly hides the startup mission banner when a key is pressed and immediately triggers onDismiss callback.
+   */
+  public hideStartupMissionMessage(initialDir?: { x: number; y: number } | null): void {
+    if (!this.isMissionBannerVisible || this.isMissionBannerDismissing) return;
+    this.isMissionBannerDismissing = true;
+
+    // Clean up input listeners immediately
+    if (this.missionInputCleanup) {
+      this.missionInputCleanup();
+      this.missionInputCleanup = undefined;
+    }
+
+    // Stop live timer
+    if (this.missionTimerEvent) {
+      this.missionTimerEvent.remove(false);
+      this.missionTimerEvent = undefined;
+    }
+
+    // Kill any active entrance tweens on the container
+    this.scene.tweens.killTweensOf(this.missionContainer);
+
+    // Fire start callback IMMEDIATELY (no delay)
+    const cb = this.onMissionBannerDismissed;
+    this.onMissionBannerDismissed = undefined;
+    if (cb) {
+      cb(initialDir);
+    }
+
+    // Smooth fade out running concurrently while gameplay begins at normal speed
     this.scene.tweens.add({
       targets: this.missionContainer,
       alpha: 0,
-      scaleX: 1.06,
-      scaleY: 1.06,
-      duration: 350,
+      scaleX: 0.95,
+      scaleY: 0.95,
+      duration: 180,
       ease: 'Power2',
       onComplete: () => {
         this.missionContainer.setVisible(false);
+        this.missionContainer.setAlpha(0);
+        this.isMissionBannerVisible = false;
+        this.isMissionBannerDismissing = false;
       },
     });
   }
@@ -826,8 +1040,15 @@ export class HUDManager {
       },
     });
   }
-
   public destroy(): void {
+    if (this.missionInputCleanup) {
+      this.missionInputCleanup();
+      this.missionInputCleanup = undefined;
+    }
+    if (this.missionTimerEvent) {
+      this.missionTimerEvent.remove(false);
+      this.missionTimerEvent = undefined;
+    }
     this.hudBg.destroy();
     this.brandBadgeContainer.destroy();
     this.progressGraphics.destroy();

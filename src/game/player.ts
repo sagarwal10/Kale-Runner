@@ -5,6 +5,7 @@
 
 import Phaser from 'phaser';
 import { MazeBFS, Point } from './levels';
+import { PLAYER_BASE_SPEED } from './constants';
 
 export interface PlayerDirection {
   x: number;
@@ -76,8 +77,8 @@ export class Player {
     this.targetTileX = startTile.x;
     this.targetTileY = startTile.y;
 
-    // Player speed: ~4.4 tiles per second
-    this.speedPx = 4.4 * this.tileSize;
+    // Player speed: 4.4 tiles per second enabled right from the start
+    this.speedPx = PLAYER_BASE_SPEED * this.tileSize;
 
     this.x = this.originX + startTile.x * this.tileSize + this.tileSize / 2;
     this.y = this.originY + startTile.y * this.tileSize + this.tileSize / 2;
@@ -96,6 +97,7 @@ export class Player {
     this.targetTileX = this.spawnTile.x;
     this.targetTileY = this.spawnTile.y;
 
+    this.speedPx = PLAYER_BASE_SPEED * this.tileSize;
     this.x = this.originX + this.tileX * this.tileSize + this.tileSize / 2;
     this.y = this.originY + this.tileY * this.tileSize + this.tileSize / 2;
     this.currentDir = { x: 0, y: 0 };

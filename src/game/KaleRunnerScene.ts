@@ -18,6 +18,7 @@ import {
   SCORE_VEGGIE,
   STORAGE_KEY_BEST_SCORE,
   STORAGE_KEY_HIGHEST_LEVEL,
+  PLAYER_BASE_SPEED,
   VEGGIE_EMOJIS,
   BERRY_LOOKUP,
   BerryDef,
@@ -114,6 +115,7 @@ export class KaleRunnerScene extends Phaser.Scene {
   // Superfood management: all superfoods displayed with strictly ONE copy of each
 
   // Game flow flags
+  private isGameStarted: boolean = false;
   private hasMovedOnceThisLevel: boolean = false;
   private hasMovedEver: boolean = false;
   private isPaused: boolean = false;
@@ -245,6 +247,7 @@ export class KaleRunnerScene extends Phaser.Scene {
     this.titleOverlayContainer = this.add.container(CANVAS_WIDTH / 2, HUD_HEIGHT + 75);
     this.titleOverlayContainer.setDepth(80);
     this.titleOverlayContainer.setScrollFactor(0);
+    this.titleOverlayContainer.setVisible(false);
 
     const titleText = this.add.text(0, -18, 'KALE RUNNER', {
       fontFamily: '"Plus Jakarta Sans", sans-serif',
@@ -276,6 +279,7 @@ export class KaleRunnerScene extends Phaser.Scene {
     this.moveHintContainer = this.add.container(0, 0);
     this.moveHintContainer.setDepth(81);
     this.moveHintContainer.setScrollFactor(0);
+    this.moveHintContainer.setVisible(false);
 
     const moveHintText = this.add.text(0, 0, 'Use the arrow keys to move', {
       fontFamily: '"Plus Jakarta Sans", sans-serif',
@@ -422,15 +426,26 @@ export class KaleRunnerScene extends Phaser.Scene {
     // Create Player
     this.player = new Player(this, playerStart, this.bfs, this.originX, this.originY, this.tileSize);
 
-    // Show big centered startup mission message
-    if (!this.hasMovedEver) {
-      this.moveHintContainer.setVisible(false);
-      this.titleOverlayContainer.setVisible(false);
-      this.hud.showStartupMissionMessage();
-    }
+    // Level 1: The game should NOT start until a key is pressed
+    if (this.currentLevelIndex === 0) {
+      this.isGameStarted = false;
+      this.hasMovedEver = false;
+      this.hasMovedOnceThisLevel = false;
 
-    // Create Enemies
-    this.createEnemies(enemyHomes);
+      // Create enemies waiting at home (do not roam yet)
+      this.createEnemies(enemyHomes, false);
+
+      // Show the Kale Runner banner with live timer (does not disappear until a key is pressed)
+      this.hud.showStartupMissionMessage((dir) => {
+        this.startGameAfterBanner(dir);
+      });
+    } else {
+      this.isGameStarted = true;
+      this.hasMovedEver = true;
+      this.hasMovedOnceThisLevel = true;
+      this.startPlayerInitialMovement(playerStart);
+      this.createEnemies(enemyHomes, true);
+    }
 
     // Update HUD
     this.hud.resetLevelTriggers();
@@ -508,25 +523,29 @@ export class KaleRunnerScene extends Phaser.Scene {
       }
     }
 
-    // Pass 2: Single uniform green grass tile for all wall blocks
+    // Pass 2: Single uniform lush green grass turf tile for all wall blocks
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         if (layout[y][x] === '#') {
           const px = this.originX + x * ts;
           const py = this.originY + y * ts;
 
-          // 1. Base dark earth & turf edge
-          this.wallsGraphics.fillStyle(0x14532d, 1.0);
+          // 1. Base dark sod earth layer
+          this.wallsGraphics.fillStyle(0x0f3318, 1.0);
           this.wallsGraphics.fillRect(px, py, ts, ts);
 
-          // 2. Rich vibrant green grass body
+          // 2. Rich vibrant green turf body
           this.wallsGraphics.fillStyle(0x15803d, 1.0);
           this.wallsGraphics.fillRect(px + 1, py + 1, ts - 2, ts - 2);
 
-          // 3. Subtle, uniform grass blades texture
-          this.drawGrassTileDetails(px, py, ts);
+          // 3. Inner sunlit turf gradient
+          this.wallsGraphics.fillStyle(0x16a34a, 0.7);
+          this.wallsGraphics.fillRoundedRect(px + 2, py + 2, ts - 4, ts - 4, 3);
 
-          // 4. Clean border along corridor edges for perfect maze readability
+          // 4. Detailed grass blades, multiple tufts & turf flecks
+          this.drawDetailedGrassTile(px, py, ts);
+
+          // 5. Crisp, smooth grass border along corridor edges (smooth edges only, no spikes)
           this.drawGrassWallEdges(layout, x, y, px, py, ts, w, h);
         }
       }
@@ -534,35 +553,82 @@ export class KaleRunnerScene extends Phaser.Scene {
   }
 
   /**
-   * Delicate, uniform grass blade accents that give the tile its authentic grass look.
+   * Renders rich, unmistakable grass texture on the tile:
+   * layered grass blade tufts, sunlit blade tips, and turf texture.
    */
-  private drawGrassTileDetails(px: number, py: number, ts: number): void {
-    const bladeColorLight = 0x22c55e;
-    const bladeColorDark = 0x166534;
+  private drawDetailedGrassTile(px: number, py: number, ts: number): void {
+    // 1. Subtle turf stippling / grass shoots
+    this.wallsGraphics.fillStyle(0x22c55e, 0.4);
+    this.wallsGraphics.fillCircle(px + ts * 0.2, py + ts * 0.22, 1.2);
+    this.wallsGraphics.fillCircle(px + ts * 0.8, py + ts * 0.25, 1.2);
+    this.wallsGraphics.fillCircle(px + ts * 0.5, py + ts * 0.55, 1.4);
+    this.wallsGraphics.fillCircle(px + ts * 0.18, py + ts * 0.75, 1.2);
+    this.wallsGraphics.fillCircle(px + ts * 0.82, py + ts * 0.72, 1.2);
 
-    // Blade tuft 1 (Left-center)
-    const b1x = px + ts * 0.32;
-    const b1y = py + ts * 0.52;
-    this.wallsGraphics.lineStyle(1.2, bladeColorDark, 0.9);
-    this.wallsGraphics.lineBetween(b1x, b1y, b1x - ts * 0.08, b1y - ts * 0.18);
-    this.wallsGraphics.lineStyle(1.2, bladeColorLight, 0.95);
-    this.wallsGraphics.lineBetween(b1x, b1y, b1x + ts * 0.06, b1y - ts * 0.2);
+    this.wallsGraphics.fillStyle(0x0f3318, 0.35);
+    this.wallsGraphics.fillCircle(px + ts * 0.38, py + ts * 0.18, 1.2);
+    this.wallsGraphics.fillCircle(px + ts * 0.65, py + ts * 0.35, 1.2);
+    this.wallsGraphics.fillCircle(px + ts * 0.3, py + ts * 0.6, 1.2);
 
-    // Blade tuft 2 (Right-center)
-    const b2x = px + ts * 0.68;
-    const b2y = py + ts * 0.68;
-    this.wallsGraphics.lineStyle(1.2, bladeColorDark, 0.9);
-    this.wallsGraphics.lineBetween(b2x, b2y, b2x - ts * 0.06, b2y - ts * 0.18);
-    this.wallsGraphics.lineStyle(1.2, bladeColorLight, 0.95);
-    this.wallsGraphics.lineBetween(b2x, b2y, b2x + ts * 0.08, b2y - ts * 0.2);
+    // 2. Multi-blade grass tuft 1 (Top-Left quadrant)
+    this.drawGrassTuft(px + ts * 0.26, py + ts * 0.38, ts * 0.24);
 
-    // Subtle soft grass highlight speck in center
-    this.wallsGraphics.fillStyle(0x4ade80, 0.35);
-    this.wallsGraphics.fillCircle(px + ts * 0.5, py + ts * 0.32, ts * 0.08);
+    // 3. Multi-blade grass tuft 2 (Center-Right quadrant)
+    this.drawGrassTuft(px + ts * 0.72, py + ts * 0.44, ts * 0.26);
+
+    // 4. Multi-blade grass tuft 3 (Bottom-Left quadrant)
+    this.drawGrassTuft(px + ts * 0.36, py + ts * 0.8, ts * 0.22);
+
+    // 5. Multi-blade grass tuft 4 (Bottom-Right quadrant)
+    this.drawGrassTuft(px + ts * 0.76, py + ts * 0.82, ts * 0.22);
+
+    // 6. Tiny 3-leaf lawn clover sprout in upper center
+    const cx = px + ts * 0.52;
+    const cy = py + ts * 0.24;
+    this.wallsGraphics.lineStyle(1.0, 0x15803d, 0.9);
+    this.wallsGraphics.lineBetween(cx, cy + 3, cx, cy);
+    this.wallsGraphics.fillStyle(0x4ade80, 0.95);
+    this.wallsGraphics.fillCircle(cx - 2, cy - 1, 1.8);
+    this.wallsGraphics.fillCircle(cx + 2, cy - 1, 1.8);
+    this.wallsGraphics.fillCircle(cx, cy - 3, 1.8);
+    this.wallsGraphics.fillStyle(0x86efac, 0.8);
+    this.wallsGraphics.fillCircle(cx, cy - 1.5, 0.9);
   }
 
   /**
-   * Crisp, clean outer border along edges facing corridors for optimal maze readability.
+   * Helper to draw a lush 3-blade tapered grass tuft with root shadow, body, and bright sunlit tips.
+   */
+  private drawGrassTuft(gx: number, gy: number, h: number): void {
+    const shadowColor = 0x0a2914;
+    const bodyColor = 0x16a34a;
+    const highlightColor = 0x4ade80;
+    const tipColor = 0x86efac;
+
+    // Root shadow
+    this.wallsGraphics.fillStyle(shadowColor, 0.8);
+    this.wallsGraphics.fillCircle(gx, gy + 1, 1.8);
+
+    // Left blade (curving slightly left)
+    this.wallsGraphics.lineStyle(1.8, bodyColor, 0.95);
+    this.wallsGraphics.lineBetween(gx, gy, gx - h * 0.4, gy - h * 0.78);
+    this.wallsGraphics.lineStyle(1.2, highlightColor, 1.0);
+    this.wallsGraphics.lineBetween(gx - h * 0.18, gy - h * 0.35, gx - h * 0.4, gy - h * 0.78);
+
+    // Center blade (tallest, upright with lime tip)
+    this.wallsGraphics.lineStyle(2.0, bodyColor, 0.95);
+    this.wallsGraphics.lineBetween(gx, gy, gx + h * 0.04, gy - h);
+    this.wallsGraphics.lineStyle(1.3, tipColor, 1.0);
+    this.wallsGraphics.lineBetween(gx + h * 0.02, gy - h * 0.45, gx + h * 0.04, gy - h);
+
+    // Right blade (curving slightly right)
+    this.wallsGraphics.lineStyle(1.8, bodyColor, 0.95);
+    this.wallsGraphics.lineBetween(gx, gy, gx + h * 0.45, gy - h * 0.72);
+    this.wallsGraphics.lineStyle(1.2, highlightColor, 1.0);
+    this.wallsGraphics.lineBetween(gx + h * 0.2, gy - h * 0.32, gx + h * 0.45, gy - h * 0.72);
+  }
+
+  /**
+   * Crisp, smooth sod border along edges facing corridors (no spikes, smooth edges only).
    */
   private drawGrassWallEdges(
     layout: string[],
@@ -574,31 +640,30 @@ export class KaleRunnerScene extends Phaser.Scene {
     w: number,
     h: number
   ): void {
-    const edgeDark = 0x0f3d20;
-    const edgeHighlight = 0x4ade80;
+    const edgeDark = 0x0a2612;
+    const edgeHighlight = 0x166534;
 
-    // North edge
+    // North edge (smooth clean sunlit rim)
     if (y === 0 || layout[y - 1][x] !== '#') {
-      this.wallsGraphics.lineStyle(2, edgeDark, 1.0);
+      this.wallsGraphics.lineStyle(2, edgeHighlight, 0.85);
       this.wallsGraphics.lineBetween(px, py + 1, px + ts, py + 1);
-      this.wallsGraphics.lineStyle(1, edgeHighlight, 0.45);
-      this.wallsGraphics.lineBetween(px + 1, py + 2, px + ts - 1, py + 2);
     }
-    // South edge
+
+    // South edge (smooth clean sod shadow)
     if (y === h - 1 || layout[y + 1][x] !== '#') {
-      this.wallsGraphics.lineStyle(2, edgeDark, 1.0);
+      this.wallsGraphics.lineStyle(2, edgeDark, 0.95);
       this.wallsGraphics.lineBetween(px, py + ts - 1, px + ts, py + ts - 1);
     }
-    // West edge
+
+    // West edge (smooth clean boundary line)
     if (x === 0 || layout[y][x - 1] !== '#') {
-      this.wallsGraphics.lineStyle(2, edgeDark, 1.0);
+      this.wallsGraphics.lineStyle(1.8, edgeDark, 0.85);
       this.wallsGraphics.lineBetween(px + 1, py, px + 1, py + ts);
-      this.wallsGraphics.lineStyle(1, edgeHighlight, 0.45);
-      this.wallsGraphics.lineBetween(px + 2, py + 1, px + 2, py + ts - 1);
     }
-    // East edge
+
+    // East edge (smooth clean boundary line)
     if (x === w - 1 || layout[y][x + 1] !== '#') {
-      this.wallsGraphics.lineStyle(2, edgeDark, 1.0);
+      this.wallsGraphics.lineStyle(1.8, edgeDark, 0.85);
       this.wallsGraphics.lineBetween(px + ts - 1, py, px + ts - 1, py + ts);
     }
   }
@@ -1063,10 +1128,9 @@ export class KaleRunnerScene extends Phaser.Scene {
     this.pellets.push(pelletItem);
   }
 
-  private createEnemies(homes: Record<string, Point>): void {
-    // Smooth, gradual difficulty ramp across levels (Level 1: 0.65x, Level 2: 0.76x)
-    const speedTable = [0.65, 0.76, 0.88, 1.0, 1.15];
-    const speedMult = speedTable[this.currentLevelIndex] ?? 1.0;
+  private createEnemies(homes: Record<string, Point>, activateNow: boolean = false): void {
+    // Normal speed right from the start (1.0x baseline speed across all levels)
+    const speedMult = 1.0;
 
     for (const enemyDef of this.currentLevelDef.enemies) {
       let homeKey = '1';
@@ -1085,11 +1149,131 @@ export class KaleRunnerScene extends Phaser.Scene {
         this.originY,
         this.tileSize,
         speedMult,
-        enemyDef.delayWakeUp || 0,
+        0, // Start moving immediately at normal speed (no snooze delay)
         this.exitDoorTile
       );
 
+      // Start roaming immediately at normal speed only if activateNow is true
+      if (activateNow) {
+        enemy.activateAfterPlayerMove();
+      }
+
       this.enemies.push(enemy);
+    }
+  }
+
+  private startPlayerInitialMovement(playerStart: Point): void {
+    const initialDirs = [
+      { x: 1, y: 0 },
+      { x: 0, y: 1 },
+      { x: -1, y: 0 },
+      { x: 0, y: -1 },
+    ];
+    for (const d of initialDirs) {
+      const nx = playerStart.x + d.x;
+      const ny = playerStart.y + d.y;
+      if (
+        nx >= 0 && nx < this.currentLevelDef.width &&
+        ny >= 0 && ny < this.currentLevelDef.height &&
+        this.currentLevelDef.layout[ny][nx] !== '#'
+      ) {
+        this.player.requestDirection(d);
+        break;
+      }
+    }
+  }
+
+  private startGameAfterBanner(initialDir?: { x: number; y: number } | null): void {
+    if (this.isGameStarted) return;
+    this.isGameStarted = true;
+    this.hasMovedEver = true;
+    this.hasMovedOnceThisLevel = true;
+
+    // Immediately enable player speed at normal 4.4 tiles/sec right from the start
+    this.player.speedPx = PLAYER_BASE_SPEED * this.tileSize;
+
+    // Start all enemies roaming at normal speed
+    for (const enemy of this.enemies) {
+      enemy.activateAfterPlayerMove();
+    }
+
+    // Fade out locked door highlight if active
+    if (this.doorHighlightContainer) {
+      const targetHighlight = this.doorHighlightContainer;
+      this.doorHighlightContainer = undefined;
+      this.tweens.add({
+        targets: targetHighlight,
+        alpha: 0,
+        duration: 450,
+        onComplete: () => {
+          targetHighlight.destroy();
+        },
+      });
+    }
+
+    // Move player in requested direction or first open alleyway immediately at 4.4 tiles/sec
+    if (initialDir) {
+      this.player.requestDirection(initialDir);
+    } else {
+      this.startPlayerInitialMovement({ x: this.player.tileX, y: this.player.tileY });
+    }
+  }
+
+  private handlePreStartInput(): void {
+    // Check direction inputs (both newly pressed or already held)
+    let requestedDir: { x: number; y: number } | null = null;
+    if (
+      Phaser.Input.Keyboard.JustDown(this.cursors.left!) ||
+      Phaser.Input.Keyboard.JustDown(this.wasdKeys.A) ||
+      this.cursors.left?.isDown ||
+      this.wasdKeys.A.isDown
+    ) {
+      requestedDir = { x: -1, y: 0 };
+    } else if (
+      Phaser.Input.Keyboard.JustDown(this.cursors.right!) ||
+      Phaser.Input.Keyboard.JustDown(this.wasdKeys.D) ||
+      this.cursors.right?.isDown ||
+      this.wasdKeys.D.isDown
+    ) {
+      requestedDir = { x: 1, y: 0 };
+    } else if (
+      Phaser.Input.Keyboard.JustDown(this.cursors.up!) ||
+      Phaser.Input.Keyboard.JustDown(this.wasdKeys.W) ||
+      this.cursors.up?.isDown ||
+      this.wasdKeys.W.isDown
+    ) {
+      requestedDir = { x: 0, y: -1 };
+    } else if (
+      Phaser.Input.Keyboard.JustDown(this.cursors.down!) ||
+      Phaser.Input.Keyboard.JustDown(this.wasdKeys.S) ||
+      this.cursors.down?.isDown ||
+      this.wasdKeys.S.isDown
+    ) {
+      requestedDir = { x: 0, y: 1 };
+    }
+
+    const anyOtherKey =
+      Phaser.Input.Keyboard.JustDown(this.enterKey) ||
+      Phaser.Input.Keyboard.JustDown(this.pKey) ||
+      Phaser.Input.Keyboard.JustDown(this.mKey) ||
+      (this.cursors.space && Phaser.Input.Keyboard.JustDown(this.cursors.space)) ||
+      (this.cursors.space && this.cursors.space.isDown);
+
+    // Also check if any key was pressed on keyboard
+    let anyKeyPressed = false;
+    if (this.input.keyboard) {
+      for (const k of this.input.keyboard.keys) {
+        if (k && (Phaser.Input.Keyboard.JustDown(k) || k.isDown)) {
+          anyKeyPressed = true;
+          break;
+        }
+      }
+    }
+
+    if (requestedDir || anyOtherKey || anyKeyPressed) {
+      sound.resumeContext();
+      this.hud.hideStartupMissionMessage(requestedDir);
+      this.startGameAfterBanner(requestedDir);
     }
   }
 
@@ -1105,6 +1289,14 @@ export class KaleRunnerScene extends Phaser.Scene {
     if (this.isPaused || this.isSuperfoodPaused || this.isGameOver || this.isGameWon || this.isTransitioningLevel || this.isDoorZooming) {
       this.handlePausedOrEndedInputs();
       return;
+    }
+
+    // Pre-start gate: the game should NOT start until a key is pressed!
+    if (!this.isGameStarted) {
+      this.handlePreStartInput();
+      if (!this.isGameStarted) {
+        return;
+      }
     }
 
     // Update combo timer
@@ -1336,11 +1528,11 @@ export class KaleRunnerScene extends Phaser.Scene {
 
     if (requestedDir) {
       sound.resumeContext();
+      this.hud.hideStartupMissionMessage();
 
       // First move ever in the game
       if (!this.hasMovedEver) {
         this.hasMovedEver = true;
-        this.hud.hideStartupMissionMessage();
 
         this.tweens.add({
           targets: [this.titleOverlayContainer, this.moveHintContainer],
