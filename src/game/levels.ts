@@ -416,12 +416,15 @@ export function validateLevelReachability(level: LevelDef): { valid: boolean; er
   }
 
   const valid = errors.length === 0;
-  if (valid) {
-    console.log(
-      `[Validation] Level ${level.number} (${level.name}) PASSED: Door reachable (${doorDist} steps), ${veggies.length} veggies, ${powerVeggies.length} power veggies.`
-    );
-  } else {
-    console.error(`[Validation] Level ${level.number} FAILED:`, errors);
+  // Only print level-check details while developing, never on the live site.
+  if (import.meta.env.DEV) {
+    if (valid) {
+      console.log(
+        `[Validation] Level ${level.number} (${level.name}) PASSED: Door reachable (${doorDist} steps), ${veggies.length} veggies, ${powerVeggies.length} power veggies.`
+      );
+    } else {
+      console.error(`[Validation] Level ${level.number} FAILED:`, errors);
+    }
   }
 
   return { valid, errors };
